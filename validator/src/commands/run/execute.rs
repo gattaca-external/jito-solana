@@ -934,6 +934,7 @@ pub fn execute(
         tvu_bls_sigverify_threads,
         delay_leader_block_for_pending_fork: !matches
             .is_present("no_delay_leader_block_for_pending_fork"),
+        slot_extension: Duration::from_millis(value_t_or_exit!(matches, "slot_extension_ms", u64)),
         turbine_mode: TurbineMode::default(),
         broadcast_stage_type: BroadcastStageType::Standard,
         block_verification_method: value_t_or_exit!(

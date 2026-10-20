@@ -436,6 +436,7 @@ dependencies = [
  "solana-hash 4.6.0",
  "solana-inflation",
  "solana-keypair",
+ "solana-leader-schedule",
  "solana-ledger",
  "solana-message",
  "solana-metrics",

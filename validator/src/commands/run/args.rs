@@ -5,6 +5,7 @@ use {
         commands::{FromClapArgMatches, Result, bam},
     },
     agave_snapshots::{SUPPORTED_ARCHIVE_COMPRESSION, SnapshotVersion},
+    agave_votor::common::DELTA_TIMEOUT,
     bytesize::ByteSize,
     clap::{App, Arg, ArgMatches, values_t},
     solana_accounts_db::utils::create_and_canonicalize_directory,
@@ -24,6 +25,7 @@ use {
         validator::{BlockProductionMethod, BlockVerificationMethod},
     },
     solana_keypair::Keypair,
+    solana_leader_schedule::NUM_CONSECUTIVE_LEADER_SLOTS,
     solana_ledger::{blockstore_options::BlockstoreOptions, use_snapshot_archives_at_startup},
     solana_net_utils::SocketAddrSpace,
     solana_pubkey::Pubkey,
@@ -141,6 +143,13 @@ impl FromClapArgMatches for RunArgs {
             },
         })
     }
+}
+
+/// Upper bound for `--slot-extension-ms`: the last block of a leader window
+/// lands `NUM_CONSECUTIVE_LEADER_SLOTS * extension` late, which must not exceed
+/// `DELTA_TIMEOUT`.
+fn max_slot_extension_ms() -> usize {
+    DELTA_TIMEOUT.as_millis() as usize / NUM_CONSECUTIVE_LEADER_SLOTS.get()
 }
 
 pub fn add_args<'a>(app: App<'a, 'a>, default_args: &'a DefaultArgs) -> App<'a, 'a> {
@@ -1172,6 +1181,24 @@ pub fn add_args<'a>(app: App<'a, 'a>, default_args: &'a DefaultArgs) -> App<'a, 
                  retaining up to the specified total bytes in the ledger. Banking trace is \
                  disabled by default.",
             ),
+    )
+    .arg(
+        Arg::with_name("slot_extension_ms")
+            .long("slot-extension-ms")
+            .value_name("MILLISECONDS")
+            .takes_value(true)
+            .validator(|s| is_within_range(s, 0..=max_slot_extension_ms()))
+            .default_value("0")
+            .help({
+                static HELP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+                HELP.get_or_init(|| {
+                    format!(
+                        "Extend each of our Alpenglow leader slots by this many milliseconds. \
+                         Must be <= {}ms.",
+                        max_slot_extension_ms()
+                    )
+                })
+            }),
     )
     .arg(
         Arg::with_name("no_delay_leader_block_for_pending_fork")

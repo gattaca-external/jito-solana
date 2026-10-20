@@ -431,6 +431,8 @@ pub struct ValidatorConfig {
     pub bam_url: Arc<ArcSwap<Option<String>>>,
     /// Skips automatic multicast route detection and multicast receiver updates.
     pub disable_multicast_shred_check: bool,
+    /// Extra time added to each Alpenglow leader slot.
+    pub slot_extension: Duration,
 }
 
 impl ValidatorConfig {
@@ -528,6 +530,7 @@ impl ValidatorConfig {
             tip_manager_config: TipManagerConfig::default(),
             bam_url: Arc::new(ArcSwap::from_pointee(None)),
             disable_multicast_shred_check: false,
+            slot_extension: Duration::ZERO,
         }
     }
 
@@ -1666,6 +1669,7 @@ impl Validator {
             highest_finalized: highest_finalized.clone(),
             banking_stage_sender: banking_stage_sender_for_bcl,
             sharable_banks: bank_forks.read().unwrap().sharable_banks(),
+            slot_extension: config.slot_extension,
         };
         let (block_creation_loop, reward_aggregates_sender) =
             BlockCreationLoop::new(block_creation_loop_config);

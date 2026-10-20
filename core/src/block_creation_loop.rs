@@ -159,6 +159,9 @@ pub struct BlockCreationLoopConfig {
 
     /// Sender for packets to banking stage (used to re-inject transactions after sad leader handover).
     pub banking_stage_sender: BankingPacketSender,
+
+    /// Extra time added to each leader slot.
+    pub slot_extension: Duration,
 }
 
 struct LeaderContext {
@@ -188,6 +191,8 @@ struct LeaderContext {
     reward_certs_requestor: CertsRequestor,
     /// Banking-stage ingress used to reschedule transactions after sad handover.
     banking_stage_sender: BankingPacketSender,
+    /// Extra time added to each leader slot.
+    slot_extension: Duration,
 
     // Metrics
     metrics: LoopMetrics,
@@ -278,6 +283,7 @@ fn start_loop(config: BlockCreationLoopConfig, reward_certs_requestor: CertsRequ
         banking_stage_sender,
         sharable_banks,
         alpenglow_slot_clock,
+        slot_extension,
     } = config;
 
     // Similar to Votor, if this loop dies kill the validator
@@ -329,6 +335,7 @@ fn start_loop(config: BlockCreationLoopConfig, reward_certs_requestor: CertsRequ
         replay_highest_frozen,
         reward_certs_requestor,
         banking_stage_sender,
+        slot_extension,
         metrics: LoopMetrics::default(),
         slot_metrics: SlotMetrics::default(),
         highest_finalized,
@@ -462,8 +469,9 @@ fn reset_poh_recorder(bank: &Arc<Bank>, ctx: &LeaderContext, preserve_replacemen
 }
 
 /// Returns the elapsed leader-window time at which `slot` must be completed.
-fn block_timeout(bank: &Bank, slot: Slot) -> Duration {
+fn block_timeout(bank: &Bank, slot: Slot, slot_extension: Duration) -> Duration {
     Duration::from_nanos_u128(bank.ns_per_slot_at_slot(slot))
+        .saturating_add(slot_extension)
         .saturating_mul((leader_slot_index(slot) as u32).saturating_add(1))
         .saturating_sub(TIME_TO_COMPLETE_BLOCK_BROADCAST)
         .saturating_sub(BLOCK_PRODUCTION_BUFFER)
@@ -619,7 +627,7 @@ fn produce_window(
     let mut slot = start_slot;
 
     while !ctx.exit.load(Ordering::Relaxed) && slot <= end_slot {
-        let timeout = block_timeout(&working_bank, slot);
+        let timeout = block_timeout(&working_bank, slot, ctx.slot_extension);
         trace!(
             "{my_pubkey}: waiting for leader bank {slot} to finish, remaining time: {}ms",
             timeout.saturating_sub(block_timer.elapsed()).as_millis()
@@ -1074,7 +1082,8 @@ fn handle_parent_ready(
 
 fn update_leader_window_clock(ctx: &LeaderContext, slot: Slot, started_at: Instant) {
     let slot_duration =
-        Duration::from_nanos_u128(ctx.sharable_banks.root().ns_per_slot_at_slot(slot));
+        Duration::from_nanos_u128(ctx.sharable_banks.root().ns_per_slot_at_slot(slot))
+            .saturating_add(ctx.slot_extension);
     ctx.alpenglow_slot_clock
         .update_leader(slot, started_at, slot_duration);
 }
@@ -1146,7 +1155,11 @@ fn start_leader_wait_for_parent_replay_with_used_bytes(
         ctx.my_pubkey
     );
     let my_pubkey = ctx.my_pubkey;
-    let timeout = block_timeout(&ctx.bank_forks.read().unwrap().root_bank(), slot);
+    let timeout = block_timeout(
+        &ctx.bank_forks.read().unwrap().root_bank(),
+        slot,
+        ctx.slot_extension,
+    );
     let end_slot = last_of_consecutive_leader_slots(slot);
 
     let mut slot_delay_start = Measure::start("slot_delay");
@@ -1672,6 +1685,7 @@ mod tests {
             replay_highest_frozen: Arc::new(ReplayHighestFrozen::default()),
             reward_certs_requestor,
             banking_stage_sender,
+            slot_extension: Duration::ZERO,
             metrics: LoopMetrics::default(),
             slot_metrics: SlotMetrics::default(),
             genesis_cert_block_marker: test_genesis_cert_block_marker(),
